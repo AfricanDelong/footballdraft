@@ -12,7 +12,8 @@ body{margin:0;min-height:100vh;background:radial-gradient(circle at 50% 0,#20332
 header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
 .logo{font-weight:900;font-size:22px;letter-spacing:.5px}
 .logo span{color:var(--green)}
-.balance{font-size:13px;color:#9ba79f}
+.balance{font-size:13px;color:#9ba79f;text-align:right;line-height:1.35}
+.balance b{color:#fff}
 .nav{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
 .nav button{min-height:46px;border:1px solid #29352d;background:#151c17;color:#89968d;border-radius:12px;font-weight:800;cursor:pointer}
 .nav button.active{color:#081008;background:var(--green);border-color:var(--green)}
@@ -43,8 +44,9 @@ h1{font-size:22px;margin:0 0 5px}
 .slot:hover img{transform:scale(1.04)}
 .slot.selected{border:2px solid var(--green);box-shadow:0 0 25px #65c46655}
 .slot.dim{opacity:.28}
-.slot.used{opacity:.45;cursor:default}
+.slot.used{opacity:.4;cursor:default;filter:grayscale(.6)}
 .slot.used:hover img{transform:none}
+.slot.used:after{content:"✓";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:46px;color:#65c466;text-shadow:0 2px 10px #000;pointer-events:none}
 .slot:empty:after{content:"?";font-size:44px;color:#364239}
 .roll-area{text-align:center}
 .lever{width:92px;height:58px;border:0;border-radius:14px;background:var(--green);color:#081008;font-size:18px;font-weight:900;cursor:pointer;box-shadow:0 5px 0 #397b3d;transition:.1s}
@@ -63,7 +65,10 @@ h1{font-size:22px;margin:0 0 5px}
 <div class="app">
 <header>
   <div class="logo">FOOTBALL<span>DRAFT</span></div>
-  <div class="balance">Состав: <b id="count">0</b></div>
+  <div class="balance">
+    Состав: <b id="count">0</b><br>
+    Доступно: <b id="left">0</b>
+  </div>
 </header>
 
 <nav class="nav">
@@ -83,14 +88,14 @@ h1{font-size:22px;margin:0 0 5px}
         <div class="dot top"></div><div class="dot center"></div><div class="dot bottom"></div>
       </div>
     </div>
-    <button class="small-btn" id="clear">Очистить поле</button>
+    <button class="small-btn" id="clear">Сбросить драфт</button>
   </div>
 </section>
 
 <section class="screen" id="slots">
   <div class="panel">
     <h1>🎰 Слот-машина</h1>
-    <div class="subtitle">Рычаг случайно выбирает трёх футболистов из найденных карточек в папке <b>images</b>. Если карточек нет — используются карточки-заглушки.</div>
+    <div class="subtitle">Рычаг случайно выбирает трёх футболистов из папки <b>images</b>. Забранный игрок <b>больше никогда не выпадет</b>.</div>
     <div class="slots">
       <div class="slot" data-index="0"></div>
       <div class="slot" data-index="1"></div>
@@ -100,7 +105,7 @@ h1{font-size:22px;margin:0 0 5px}
       <button class="lever" id="roll" disabled>КРУТИТЬ</button>
       <div class="status" id="status">Загрузка…</div>
     </div>
-    <div class="info">Формат файлов: images/player1.png (поддерживаются также .jpg, .jpeg, .webp)</div>
+    <div class="info">Формат файлов: images/player1.png (также .jpg, .jpeg, .webp). Если карточек нет — используются заглушки.</div>
   </div>
 </section>
 </div>
@@ -108,34 +113,39 @@ h1{font-size:22px;margin:0 0 5px}
 <script>
 const root = document.querySelector('.app');
 const navButtons = [...root.querySelectorAll('.nav button')];
-const screens = [...root.querySelectorAll('.screen')];
-const slotEls = [...root.querySelectorAll('.slot')];
-const rollBtn = root.querySelector('#roll');
-const statusEl = root.querySelector('#status');
-const pitch = root.querySelector('#pitch');
-const countEl = root.querySelector('#count');
-const clearBtn = root.querySelector('#clear');
+const screens   = [...root.querySelectorAll('.screen')];
+const slotEls   = [...root.querySelectorAll('.slot')];
+const rollBtn   = root.querySelector('#roll');
+const statusEl  = root.querySelector('#status');
+const pitch     = root.querySelector('#pitch');
+const countEl   = root.querySelector('#count');
+const leftEl    = root.querySelector('#left');
+const clearBtn  = root.querySelector('#clear');
 
-const MAX_PLAYERS = 500;                        // максимум проверяемых номеров
-const EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp'];
-const MISS_LIMIT = 30;                          // столько промахов подряд — и прекращаем скан
+const MAX_PLAYERS   = 500;              // максимум проверяемых номеров
+const EXTENSIONS    = ['png', 'jpg', 'jpeg', 'webp'];
+const MISS_LIMIT    = 30;               // промахов подряд — и стоп
 const PROBE_TIMEOUT = 4000;
+const MIN_UNUSED    = 9;                // поддерживаемый запас нерозыгранных карточек
 
-let availablePlayers = [];      // [{ n, src, fake }]
-let currentPlayers = [null, null, null];
-let placedPlayers = [];
-let initPromise = null;
-let rolling = false;
+let availablePlayers   = [];            // [{ n, src, fake }]
+let currentPlayers     = [null, null, null];
+let placedPlayers      = [];
+let usedPlayerNumbers  = new Set();     // <-- кто уже забран
+let allowFakes         = false;         // можно ли добивать заглушками
+let nextFakeN          = 1;
+let initPromise        = null;
+let rolling            = false;
 
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
-/* ---------- навигация ---------- */
+/* ============ НАВИГАЦИЯ ============ */
 navButtons.forEach(btn => btn.addEventListener('click', () => {
   navButtons.forEach(x => x.classList.toggle('active', x === btn));
   screens.forEach(s => s.classList.toggle('active', s.id === btn.dataset.screen));
 }));
 
-/* ---------- поиск карточек ---------- */
+/* ============ ПОИСК КАРТОЧЕК ============ */
 function tryLoadImage(src, timeout = PROBE_TIMEOUT){
   return new Promise(resolve => {
     const img = new Image();
@@ -175,7 +185,6 @@ async function findAvailablePlayers(){
     let hits = 0;
     results.forEach(r => { if(r){ found.push(r); hits++; } });
 
-    // если в пачке были попадания — счётчик промахов сбрасывается
     misses = hits ? 0 : misses + batch.length;
   }
 
@@ -183,7 +192,7 @@ async function findAvailablePlayers(){
   return found;
 }
 
-/* ---------- заглушка, если картинок нет ---------- */
+/* ============ ЗАГЛУШКИ ============ */
 const FAKE_COLORS = ['#65c466','#4a90d9','#e0b13a','#d9534f','#9b59b6','#2fb3a5','#e67e22','#1abc9c'];
 
 function placeholderSrc(n){
@@ -200,9 +209,22 @@ function placeholderSrc(n){
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
 
-/* ---------- слоты ---------- */
+/* ============ ПУЛ ИГРОКОВ ============ */
+function unusedPlayers(){
+  return availablePlayers.filter(p => !usedPlayerNumbers.has(p.n));
+}
+
+function ensureUnused(minCount){
+  if(!allowFakes) return;
+  while(unusedPlayers().length < minCount){
+    while(availablePlayers.some(p => p.n === nextFakeN)) nextFakeN++;
+    availablePlayers.push({ n: nextFakeN, src: placeholderSrc(nextFakeN), fake: true });
+    nextFakeN++;
+  }
+}
+
 function randomThree(){
-  const pool = [...availablePlayers];
+  const pool = unusedPlayers();
   const result = [];
   while(result.length < 3 && pool.length){
     const i = Math.floor(Math.random() * pool.length);
@@ -211,6 +233,7 @@ function randomThree(){
   return result;
 }
 
+/* ============ ОТРИСОВКА ============ */
 function renderSlot(el, player){
   el.innerHTML = '';
   if(!player) return;
@@ -221,10 +244,19 @@ function renderSlot(el, player){
   el.appendChild(img);
 }
 
+function updateCounters(){
+  countEl.textContent = placedPlayers.length;
+  leftEl.textContent  = unusedPlayers().length;
+}
+
+/* ============ ВЫБОР ИГРОКА ИЗ СЛОТА ============ */
 function selectSlot(index){
   const player = currentPlayers[index];
   if(!player) return;
-  if(slotEls[index].classList.contains('used')) return;   // уже выставлен на поле
+  if(slotEls[index].classList.contains('used')) return;
+
+  // КЛЮЧЕВОЕ: помечаем игрока как забранного — он больше не выпадет
+  usedPlayerNumbers.add(player.n);
 
   slotEls[index].classList.add('used');
   slotEls.forEach((el, i) => {
@@ -233,10 +265,15 @@ function selectSlot(index){
   });
 
   addPlayerToPitch(player);
-  statusEl.textContent = 'Игрок добавлен на поле. Перетащи его на нужную позицию.';
+  updateCounters();
+
+  const left = unusedPlayers().length;
+  statusEl.textContent = left >= 3
+    ? `Игрок добавлен на поле. Осталось нерозыгранных: ${left}.`
+    : `Игрок добавлен. Свободных карточек больше нет — жми «Сбросить драфт».`;
 }
 
-/* ---------- поле ---------- */
+/* ============ ПОЛЕ ============ */
 function addPlayerToPitch(player){
   const el = document.createElement('div');
   el.className = 'player';
@@ -252,7 +289,6 @@ function addPlayerToPitch(player){
 
   pitch.appendChild(el);
   placedPlayers.push(el);
-  countEl.textContent = placedPlayers.length;
   makeDraggable(el);
 }
 
@@ -294,26 +330,25 @@ function makeDraggable(el){
   el.addEventListener('lostpointercapture', stop);
 }
 
-/* ---------- прокрутка ---------- */
+/* ============ ПРОКРУТ ============ */
 async function roll(){
   if(rolling) return;
   rolling = true;
   rollBtn.disabled = true;
 
   try{
-    if(initPromise) await initPromise;   // ждём окончания сканирования картинок
+    if(initPromise) await initPromise;
 
-    if(availablePlayers.length < 3){
-      statusEl.textContent = 'Недостаточно карточек для игры.';
+    // добиваем пул заглушками, если реальных карточек мало
+    ensureUnused(MIN_UNUSED);
+
+    if(unusedPlayers().length < 3){
+      statusEl.textContent = 'Больше нет доступных игроков. Нажми «Сбросить драфт».';
       return;
     }
 
-    slotEls.forEach(x => {
-      x.innerHTML = '';
-      x.className = 'slot';
-    });
+    slotEls.forEach(x => { x.innerHTML = ''; x.className = 'slot'; });
     currentPlayers = [null, null, null];
-
     statusEl.textContent = 'Крутим...';
 
     for(let i = 0; i < 10; i++){
@@ -324,31 +359,45 @@ async function roll(){
 
     currentPlayers = randomThree();
     currentPlayers.forEach((p, i) => renderSlot(slotEls[i], p));
-    statusEl.textContent = 'Выбери одного из трёх.';
+
+    const left = unusedPlayers().length;
+    statusEl.textContent = `Выбери одного из трёх. Осталось нерозыгранных: ${left}.`;
+    updateCounters();
   } finally {
     rolling = false;
     rollBtn.disabled = false;
   }
 }
 
-/* ---------- очистка поля ---------- */
+/* ============ СБРОС ============ */
 clearBtn.addEventListener('click', () => {
   placedPlayers.forEach(x => x.remove());
   placedPlayers = [];
-  countEl.textContent = '0';
-  // разрешаем заново выставлять уже использованные слоты
-  slotEls.forEach(el => el.classList.remove('used', 'selected', 'dim'));
-  if(currentPlayers.some(Boolean)){
-    statusEl.textContent = 'Выбери одного из трёх.';
-  }
+  usedPlayerNumbers.clear();
+  currentPlayers = [null, null, null];
+
+  slotEls.forEach(el => {
+    el.className = 'slot';
+    el.innerHTML = '';
+  });
+
+  ensureUnused(MIN_UNUSED);
+  updateCounters();
+
+  const total = availablePlayers.length;
+  const fake  = availablePlayers.filter(p => p.fake).length;
+  statusEl.textContent = fake
+    ? `Драфт сброшен. Доступно карточек: ${total} (заглушек: ${fake}).`
+    : `Драфт сброшен. Доступно карточек: ${total}.`;
 });
 
 slotEls.forEach((el, i) => el.addEventListener('click', () => selectSlot(i)));
 rollBtn.addEventListener('click', roll);
 
-/* ---------- инициализация ---------- */
+/* ============ ИНИЦИАЛИЗАЦИЯ ============ */
 async function init(){
   statusEl.textContent = 'Проверяем карточки в images...';
+
   let found = [];
   try {
     found = await findAvailablePlayers();
@@ -357,25 +406,18 @@ async function init(){
   }
 
   availablePlayers = found.slice();
+  allowFakes = found.length < 3;
 
   if(availablePlayers.length >= 3){
     statusEl.textContent = `Найдено карточек: ${availablePlayers.length}. Нажми рычаг.`;
   } else {
-    // добиваем заглушками, чтобы слот-машина работала в любом случае
-    const used = new Set(availablePlayers.map(p => p.n));
-    let n = 1;
-    while(availablePlayers.length < 3){
-      if(!used.has(n)){
-        availablePlayers.push({ n, src: placeholderSrc(n), fake: true });
-        used.add(n);
-      }
-      n++;
-    }
+    ensureUnused(MIN_UNUSED);
     statusEl.textContent = found.length
-      ? `Найдено карточек: ${found.length}. Остальные — заглушки.`
+      ? `Найдено карточек: ${found.length}. Добавлены заглушки, чтобы игра работала.`
       : 'Карточки в images не найдены — играем с заглушками.';
   }
 
+  updateCounters();
   rollBtn.disabled = false;
 }
 
