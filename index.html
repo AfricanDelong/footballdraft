@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Football Draft</title>
+<style>
+*{box-sizing:border-box}
+:root{--green:#65c466;--bg:#0d120f;--panel:#151c17;--line:#ffffffaa}
+body{margin:0;min-height:100vh;background:radial-gradient(circle at 50% 0,#203326 0,#0d120f 48%);color:#fff;font-family:Arial,Helvetica,sans-serif;display:flex;justify-content:center;padding:18px}
+.app{width:min(760px,100%);min-height:calc(100vh - 36px);display:flex;flex-direction:column}
+header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.logo{font-weight:900;font-size:22px;letter-spacing:.5px}
+.logo span{color:var(--green)}
+.balance{font-size:13px;color:#9ba79f}
+.nav{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
+.nav button{min-height:46px;border:1px solid #29352d;background:#151c17;color:#89968d;border-radius:12px;font-weight:800;cursor:pointer}
+.nav button.active{color:#081008;background:var(--green);border-color:var(--green)}
+.screen{display:none;flex:1}
+.screen.active{display:block}
+.panel{background:#151c17;border:1px solid #29352d;border-radius:20px;padding:16px}
+h1{font-size:22px;margin:0 0 5px}
+.subtitle{color:#7e8a82;font-size:13px;margin-bottom:15px}
+.pitch-wrap{display:flex;justify-content:center}
+.pitch{position:relative;width:min(390px,100%);aspect-ratio:.68;background:#2d7d40;border:2px solid #55a65d;border-radius:15px;overflow:hidden;box-shadow:inset 0 0 60px #174923}
+.pitch:before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(0deg,#ffffff06 0 9%,transparent 9% 18%);pointer-events:none}
+.outer{position:absolute;inset:2.5%;border:2px solid var(--line)}
+.mid{position:absolute;left:2.5%;right:2.5%;top:50%;border-top:2px solid var(--line)}
+.circle{position:absolute;left:50%;top:50%;width:25%;aspect-ratio:1;border:2px solid var(--line);border-radius:50%;transform:translate(-50%,-50%)}
+.penalty{position:absolute;left:25%;width:50%;height:18%;border:2px solid var(--line)}
+.penalty.top{top:2.5%;border-top:0}.penalty.bottom{bottom:2.5%;border-bottom:0}
+.goal{position:absolute;left:37%;width:26%;height:5%;border:2px solid var(--line)}
+.goal.top{top:2.5%;border-top:0}.goal.bottom{bottom:2.5%;border-bottom:0}
+.dot{position:absolute;left:50%;width:7px;height:7px;background:#fff;border-radius:50%;transform:translateX(-50%)}
+.dot.top{top:17%}.dot.center{top:50%;transform:translate(-50%,-50%)}.dot.bottom{bottom:17%}
+.player{position:absolute;width:74px;height:86px;transform:translate(-50%,-50%);cursor:grab;z-index:5;touch-action:none}
+.player:active{cursor:grabbing}
+.player.dragging{z-index:30}
+.player img{width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 6px 6px #0009);pointer-events:none;user-select:none;-webkit-user-drag:none}
+.slots{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}
+.slot{min-width:0;height:220px;border-radius:14px;background:#0b100d;border:1px solid #303b33;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer;position:relative}
+.slot img{width:100%;height:100%;object-fit:contain;transition:.2s}
+.slot:hover img{transform:scale(1.04)}
+.slot.selected{border:2px solid var(--green);box-shadow:0 0 25px #65c46655}
+.slot.dim{opacity:.28}
+.slot.used{opacity:.45;cursor:default}
+.slot.used:hover img{transform:none}
+.slot:empty:after{content:"?";font-size:44px;color:#364239}
+.roll-area{text-align:center}
+.lever{width:92px;height:58px;border:0;border-radius:14px;background:var(--green);color:#081008;font-size:18px;font-weight:900;cursor:pointer;box-shadow:0 5px 0 #397b3d;transition:.1s}
+.lever:active{transform:translateY(4px);box-shadow:0 1px 0 #397b3d}
+.lever:disabled{opacity:.5;cursor:not-allowed}
+.status{text-align:center;color:#a6b1aa;font-size:13px;min-height:20px;margin:14px 0 2px}
+.info{text-align:center;color:#68756c;font-size:11px;margin-top:12px}
+.small-btn{width:100%;margin-top:14px;min-height:44px;border:1px solid #303a33;background:#202920;color:#adb7b0;border-radius:10px;cursor:pointer}
+@media(max-width:520px){
+ body{padding:10px}.app{min-height:calc(100vh - 20px)}
+ .slot{height:175px}.pitch{width:min(350px,100%)}
+}
+</style>
+</head>
+<body>
+<div class="app">
+<header>
+  <div class="logo">FOOTBALL<span>DRAFT</span></div>
+  <div class="balance">Состав: <b id="count">0</b></div>
+</header>
+
+<nav class="nav">
+  <button class="active" data-screen="field">⚽ Поле</button>
+  <button data-screen="slots">🎰 Слоты</button>
+</nav>
+
+<section class="screen active" id="field">
+  <div class="panel">
+    <h1>Моя команда</h1>
+    <div class="subtitle">Выбери футболиста в слотах и перетащи его на нужную позицию.</div>
+    <div class="pitch-wrap">
+      <div class="pitch" id="pitch">
+        <div class="outer"></div><div class="mid"></div><div class="circle"></div>
+        <div class="penalty top"></div><div class="penalty bottom"></div>
+        <div class="goal top"></div><div class="goal bottom"></div>
+        <div class="dot top"></div><div class="dot center"></div><div class="dot bottom"></div>
+      </div>
+    </div>
+    <button class="small-btn" id="clear">Очистить поле</button>
+  </div>
+</section>
+
+<section class="screen" id="slots">
+  <div class="panel">
+    <h1>🎰 Слот-машина</h1>
+    <div class="subtitle">Рычаг случайно выбирает трёх футболистов из найденных карточек в папке <b>images</b>. Если карточек нет — используются карточки-заглушки.</div>
+    <div class="slots">
+      <div class="slot" data-index="0"></div>
+      <div class="slot" data-index="1"></div>
+      <div class="slot" data-index="2"></div>
+    </div>
+    <div class="roll-area">
+      <button class="lever" id="roll" disabled>КРУТИТЬ</button>
+      <div class="status" id="status">Загрузка…</div>
+    </div>
+    <div class="info">Формат файлов: images/player1.png (поддерживаются также .jpg, .jpeg, .webp)</div>
+  </div>
+</section>
+</div>
+
+<script>
+const root = document.querySelector('.app');
+const navButtons = [...root.querySelectorAll('.nav button')];
+const screens = [...root.querySelectorAll('.screen')];
+const slotEls = [...root.querySelectorAll('.slot')];
+const rollBtn = root.querySelector('#roll');
+const statusEl = root.querySelector('#status');
+const pitch = root.querySelector('#pitch');
+const countEl = root.querySelector('#count');
+const clearBtn = root.querySelector('#clear');
+
+const MAX_PLAYERS = 500;                        // максимум проверяемых номеров
+const EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp'];
+const MISS_LIMIT = 30;                          // столько промахов подряд — и прекращаем скан
+const PROBE_TIMEOUT = 4000;
+
+let availablePlayers = [];      // [{ n, src, fake }]
+let currentPlayers = [null, null, null];
+let placedPlayers = [];
+let initPromise = null;
+let rolling = false;
+
+const wait = ms => new Promise(r => setTimeout(r, ms));
+
+/* ---------- навигация ---------- */
+navButtons.forEach(btn => btn.addEventListener('click', () => {
+  navButtons.forEach(x => x.classList.toggle('active', x === btn));
+  screens.forEach(s => s.classList.toggle('active', s.id === btn.dataset.screen));
+}));
+
+/* ---------- поиск карточек ---------- */
+function tryLoadImage(src, timeout = PROBE_TIMEOUT){
+  return new Promise(resolve => {
+    const img = new Image();
+    let done = false;
+    const finish = value => {
+      if(done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(null), timeout);
+    img.onload  = () => finish(src);
+    img.onerror = () => finish(null);
+    img.src = src;
+  });
+}
+
+async function probePlayer(n){
+  for(const ext of EXTENSIONS){
+    const src = `images/player${n}.${ext}`;
+    if(await tryLoadImage(src)) return { n, src, fake: false };
+  }
+  return null;
+}
+
+async function findAvailablePlayers(){
+  const found = [];
+  const BATCH = 10;
+  let misses = 0;
+  let n = 1;
+
+  while(n <= MAX_PLAYERS && misses < MISS_LIMIT){
+    const batch = [];
+    for(let i = 0; i < BATCH && n <= MAX_PLAYERS; i++, n++) batch.push(n);
+
+    const results = await Promise.all(batch.map(probePlayer));
+    let hits = 0;
+    results.forEach(r => { if(r){ found.push(r); hits++; } });
+
+    // если в пачке были попадания — счётчик промахов сбрасывается
+    misses = hits ? 0 : misses + batch.length;
+  }
+
+  found.sort((a, b) => a.n - b.n);
+  return found;
+}
+
+/* ---------- заглушка, если картинок нет ---------- */
+const FAKE_COLORS = ['#65c466','#4a90d9','#e0b13a','#d9534f','#9b59b6','#2fb3a5','#e67e22','#1abc9c'];
+
+function placeholderSrc(n){
+  const c = FAKE_COLORS[(n - 1) % FAKE_COLORS.length];
+  const svg =
+`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240">
+<ellipse cx="100" cy="228" rx="50" ry="8" fill="#000" opacity=".35"/>
+<path d="M70 66 L44 84 L30 116 L56 126 L62 108 L62 210 Q100 218 138 210 L138 108 L144 126 L170 116 L156 84 L130 66 Q100 84 70 66 Z"
+      fill="${c}" stroke="#0d120f" stroke-width="5" stroke-linejoin="round"/>
+<circle cx="100" cy="48" r="24" fill="#e8c39e" stroke="#0d120f" stroke-width="5"/>
+<text x="100" y="175" font-family="Arial,Helvetica,sans-serif" font-size="54" font-weight="900"
+      fill="#0d120f" text-anchor="middle">${n}</text>
+</svg>`;
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+}
+
+/* ---------- слоты ---------- */
+function randomThree(){
+  const pool = [...availablePlayers];
+  const result = [];
+  while(result.length < 3 && pool.length){
+    const i = Math.floor(Math.random() * pool.length);
+    result.push(pool.splice(i, 1)[0]);
+  }
+  return result;
+}
+
+function renderSlot(el, player){
+  el.innerHTML = '';
+  if(!player) return;
+  const img = document.createElement('img');
+  img.src = player.src;
+  img.alt = `Игрок ${player.n}`;
+  img.draggable = false;
+  el.appendChild(img);
+}
+
+function selectSlot(index){
+  const player = currentPlayers[index];
+  if(!player) return;
+  if(slotEls[index].classList.contains('used')) return;   // уже выставлен на поле
+
+  slotEls[index].classList.add('used');
+  slotEls.forEach((el, i) => {
+    el.classList.toggle('selected', i === index);
+    el.classList.toggle('dim', i !== index);
+  });
+
+  addPlayerToPitch(player);
+  statusEl.textContent = 'Игрок добавлен на поле. Перетащи его на нужную позицию.';
+}
+
+/* ---------- поле ---------- */
+function addPlayerToPitch(player){
+  const el = document.createElement('div');
+  el.className = 'player';
+  el.style.left = (25 + Math.random() * 50) + '%';
+  el.style.top  = (28 + Math.random() * 44) + '%';
+  el.dataset.player = player.n;
+
+  const img = document.createElement('img');
+  img.src = player.src;
+  img.alt = `Игрок ${player.n}`;
+  img.draggable = false;
+  el.appendChild(img);
+
+  pitch.appendChild(el);
+  placedPlayers.push(el);
+  countEl.textContent = placedPlayers.length;
+  makeDraggable(el);
+}
+
+function makeDraggable(el){
+  let dragging = false;
+  let pointerId = null;
+
+  el.addEventListener('pointerdown', e => {
+    dragging = true;
+    pointerId = e.pointerId;
+    el.classList.add('dragging');
+    try { el.setPointerCapture(e.pointerId); } catch(_) {}
+    e.preventDefault();
+  });
+
+  el.addEventListener('pointermove', e => {
+    if(!dragging || e.pointerId !== pointerId) return;
+    const r = pitch.getBoundingClientRect();
+    let x = ((e.clientX - r.left) / r.width) * 100;
+    let y = ((e.clientY - r.top) / r.height) * 100;
+    x = Math.max(8, Math.min(92, x));
+    y = Math.max(8, Math.min(92, y));
+    el.style.left = x + '%';
+    el.style.top  = y + '%';
+  });
+
+  const stop = () => {
+    if(!dragging) return;
+    dragging = false;
+    el.classList.remove('dragging');
+    if(pointerId !== null){
+      try { el.releasePointerCapture(pointerId); } catch(_) {}
+      pointerId = null;
+    }
+  };
+
+  el.addEventListener('pointerup', stop);
+  el.addEventListener('pointercancel', stop);
+  el.addEventListener('lostpointercapture', stop);
+}
+
+/* ---------- прокрутка ---------- */
+async function roll(){
+  if(rolling) return;
+  rolling = true;
+  rollBtn.disabled = true;
+
+  try{
+    if(initPromise) await initPromise;   // ждём окончания сканирования картинок
+
+    if(availablePlayers.length < 3){
+      statusEl.textContent = 'Недостаточно карточек для игры.';
+      return;
+    }
+
+    slotEls.forEach(x => {
+      x.innerHTML = '';
+      x.className = 'slot';
+    });
+    currentPlayers = [null, null, null];
+
+    statusEl.textContent = 'Крутим...';
+
+    for(let i = 0; i < 10; i++){
+      const temp = randomThree();
+      temp.forEach((p, j) => renderSlot(slotEls[j], p));
+      await wait(55 + i * 12);
+    }
+
+    currentPlayers = randomThree();
+    currentPlayers.forEach((p, i) => renderSlot(slotEls[i], p));
+    statusEl.textContent = 'Выбери одного из трёх.';
+  } finally {
+    rolling = false;
+    rollBtn.disabled = false;
+  }
+}
+
+/* ---------- очистка поля ---------- */
+clearBtn.addEventListener('click', () => {
+  placedPlayers.forEach(x => x.remove());
+  placedPlayers = [];
+  countEl.textContent = '0';
+  // разрешаем заново выставлять уже использованные слоты
+  slotEls.forEach(el => el.classList.remove('used', 'selected', 'dim'));
+  if(currentPlayers.some(Boolean)){
+    statusEl.textContent = 'Выбери одного из трёх.';
+  }
+});
+
+slotEls.forEach((el, i) => el.addEventListener('click', () => selectSlot(i)));
+rollBtn.addEventListener('click', roll);
+
+/* ---------- инициализация ---------- */
+async function init(){
+  statusEl.textContent = 'Проверяем карточки в images...';
+  let found = [];
+  try {
+    found = await findAvailablePlayers();
+  } catch(err){
+    console.error('Ошибка сканирования карточек:', err);
+  }
+
+  availablePlayers = found.slice();
+
+  if(availablePlayers.length >= 3){
+    statusEl.textContent = `Найдено карточек: ${availablePlayers.length}. Нажми рычаг.`;
+  } else {
+    // добиваем заглушками, чтобы слот-машина работала в любом случае
+    const used = new Set(availablePlayers.map(p => p.n));
+    let n = 1;
+    while(availablePlayers.length < 3){
+      if(!used.has(n)){
+        availablePlayers.push({ n, src: placeholderSrc(n), fake: true });
+        used.add(n);
+      }
+      n++;
+    }
+    statusEl.textContent = found.length
+      ? `Найдено карточек: ${found.length}. Остальные — заглушки.`
+      : 'Карточки в images не найдены — играем с заглушками.';
+  }
+
+  rollBtn.disabled = false;
+}
+
+initPromise = init();
+</script>
+</body>
+</html>
